@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE settings
+.vscode/
+.idea/
+
+# The actual downloaded media
+Downloads/
+downloads/
+ChanScraper/
+
+# Logs
+*.log
