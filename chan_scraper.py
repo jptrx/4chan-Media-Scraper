@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 # Third-party dependencies
 # pip install aiohttp Pillow
 import aiohttp
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 
 # --- Configuration ---
 API_BASE = "https://a.4cdn.org"
@@ -43,6 +43,10 @@ class MediaItem:
     @property
     def local_filename(self) -> str:
         return f"{self.tim}{self.ext}"
+    
+    @property
+    def is_video(self) -> bool:
+        return self.ext.lower() in ['.webm', '.mp4', '.gif']
 
 class AsyncWorker:
     """Handles async network tasks in a separate thread."""
@@ -280,7 +284,7 @@ class ChanScraperApp(tk.Tk):
                     self.media_items.append(item)
                     seen_tim.add(post['tim'])
         
-        self.after(0, lambda: self.status_var.set(f"Found {len(self.media_items)} images. Loading thumbnails..."))
+        self.after(0, lambda: self.status_var.set(f"Found {len(self.media_items)} items. Loading thumbnails..."))
         self.after(0, self.render_grid_placeholders)
         
         # Fetch thumbnails in parallel
@@ -317,11 +321,11 @@ class ChanScraperApp(tk.Tk):
     def open_preview(self, frame_widget, item):
         """Opens a larger preview window for the item."""
         p_win = tk.Toplevel(self)
-        p_win.title(f"Preview: {item.filename}")
+        p_win.title(f"Preview: {item.filename}{item.ext}")
         p_win.geometry("800x700")
         
         # Image Area
-        img_lbl = tk.Label(p_win, text="Loading full resolution...", bg="black", fg="white")
+        img_lbl = tk.Label(p_win, text="Loading...", bg="black", fg="white")
         img_lbl.pack(expand=True, fill=tk.BOTH)
         
         # Control Area
@@ -331,9 +335,9 @@ class ChanScraperApp(tk.Tk):
         # Define logic to update button appearance
         def update_btn_state():
             if item.tim in self.selected_items:
-                sel_btn.configure(text="DESELECT IMAGE", bg="#ffdddd", fg="red")
+                sel_btn.configure(text="DESELECT ITEM", bg="#ffdddd", fg="red")
             else:
-                sel_btn.configure(text="SELECT IMAGE", bg="#ddffdd", fg="green")
+                sel_btn.configure(text="SELECT ITEM", bg="#ddffdd", fg="green")
 
         def toggle_and_update():
             # Toggle in main app
@@ -346,9 +350,21 @@ class ChanScraperApp(tk.Tk):
         
         # Set initial state
         update_btn_state()
-        
-        # Start fetch of full image
-        self._run_async(self._fetch_preview(item.full_url, img_lbl, p_win))
+
+        # Handle Video Files (WebM, etc)
+        if item.is_video:
+            # For videos, we can't display the full file in Tkinter easily.
+            # We show the thumbnail and an "Open in Browser" button.
+            play_btn = tk.Button(btn_frame, text="▶ Play Video in Browser", command=lambda: webbrowser.open(item.full_url))
+            play_btn.pack(fill=tk.X, ipady=5, pady=5, side=tk.TOP)
+            
+            img_lbl.configure(text="Video Preview\n(Showing Thumbnail)")
+            
+            # Fetch the thumbnail for the preview window
+            self._run_async(self._fetch_preview(item.thumb_url, img_lbl, p_win))
+        else:
+            # Start fetch of full image
+            self._run_async(self._fetch_preview(item.full_url, img_lbl, p_win))
 
     async def _fetch_preview(self, url, label, window):
         data = await self.worker.fetch_image_bytes(url)
@@ -368,7 +384,7 @@ class ChanScraperApp(tk.Tk):
             # Smart Resize Logic
             # Default dimensions if window not fully drawn yet
             win_w = window.winfo_width()
-            win_h = window.winfo_height() - 80 # subtract button area
+            win_h = window.winfo_height() - 120 # subtract button area
             if win_w <= 1: win_w = 800
             if win_h <= 1: win_h = 600
             
@@ -376,10 +392,15 @@ class ChanScraperApp(tk.Tk):
             
             # Scale down if image is larger than window
             ratio = min(win_w/img_w, win_h/img_h)
+            
+            # Only resize if necessary or if we want to scale up slightly
             if ratio < 1:
                 new_size = (int(img_w * ratio), int(img_h * ratio))
                 pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
-            
+            elif ratio > 1 and img_w < 400: # Scale up tiny thumbnails
+                 new_size = (int(img_w * 2), int(img_h * 2))
+                 pil_img = pil_img.resize(new_size, Image.Resampling.NEAREST)
+
             tk_img = ImageTk.PhotoImage(pil_img)
             label.configure(image=tk_img, text="")
             label.image = tk_img # Keep ref preventing GC
@@ -414,6 +435,15 @@ class ChanScraperApp(tk.Tk):
                 # Process image with Pillow
                 pil_img = Image.open(BytesIO(data))
                 pil_img.thumbnail((150, 150)) 
+                
+                # Overlay for Video Files
+                if frame.item.is_video:
+                    draw = ImageDraw.Draw(pil_img)
+                    # Draw a small red tag based on extension
+                    ext_text = frame.item.ext.upper().lstrip('.')
+                    draw.rectangle([0, 0, 40, 15], fill="red")
+                    draw.text((2, 1), ext_text, fill="white")
+
                 tk_img = ImageTk.PhotoImage(pil_img)
                 
                 # Update Label
