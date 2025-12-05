@@ -31,13 +31,13 @@ A sophisticated, asynchronous media scraper for 4chan threads. Version 1.2.0 int
 ## Installation
 
 ### Option 1: Windows Installer (Recommended)
-Download `4chan_Media_Scraper_Setup_v1.2.0.exe` from the Releases page.
+Download `4chan-Media-Scraper-Setup-v1.2.0.exe` from the Releases page.
 * Installs the application to your system (Program Files).
 * Creates a **Start Menu Program Group** and Desktop shortcut.
 * Includes a clean uninstaller.
 
 ### Option 2: Portable (Standalone)
-Download `4ChanScraper.exe`.
+Download `4chan-Media-Scraper-v1.2.0.exe`.
 * No installation required.
 * Runs immediately (Great for USB drives).
 
