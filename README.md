@@ -41,7 +41,13 @@ Download `4chan-Media-Scraper-v1.2.0.exe`.
 * No installation required.
 * Runs immediately (Great for USB drives).
 
-### Option 3: Run from Source
+### Option 3: Source Code (.zip)
+Download `4chan-Media-Scraper-Source-v1.2.0.zip`.
+1.  Extract the zip file.
+2.  Double-click **`run_scraper.bat`**.
+    * This script will automatically install Python dependencies and launch the app.
+
+### Option 4: Git Clone (Advanced)
 1.  Clone the repository:
     ```bash
     git clone [https://github.com/jptrx/4chan-Media-Scraper.git](https://github.com/jptrx/4chan-Media-Scraper.git)
