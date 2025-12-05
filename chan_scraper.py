@@ -46,19 +46,13 @@ logger = logging.getLogger("ChanGUI")
 def get_resource_path(relative_path):
     """ Robustly find the path to a resource file. """
     try:
-        # PyInstaller _MEIPASS
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         
-        # Nuitka and Dev candidates
         candidates = [
-            # 1. Look relative to the script/module (Nuitka __file__)
             os.path.dirname(os.path.abspath(__file__)),
-            # 2. Look in the sys.prefix (Nuitka extraction root)
             sys.prefix,
-            # 3. Look relative to the executable (if frozen)
             os.path.dirname(sys.executable),
-            # 4. Look in current working directory
             os.getcwd()
         ]
         
@@ -69,8 +63,6 @@ def get_resource_path(relative_path):
                 
     except Exception:
         pass
-        
-    # Fallback
     return os.path.abspath(relative_path)
 
 @dataclass
@@ -79,7 +71,7 @@ class MediaItem:
     ext: str
     filename: str
     board: str
-    fsize: int = 0  # Added file size tracking
+    fsize: int = 0
     
     @property
     def full_url(self) -> str:
@@ -220,7 +212,6 @@ class ChanScraperApp(ttk.Window):
         self._init_ui()
         self._run_async(self.worker.init_session())
 
-        # Auto-Update Check on Startup
         if self.settings.get("check_updates", True):
             self.after(2000, lambda: self.check_updates(silent=True))
 
@@ -266,7 +257,7 @@ class ChanScraperApp(ttk.Window):
         
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open Thread in Browser", command=self.open_thread_browser) # New Item
+        file_menu.add_command(label="Open Thread in Browser", command=self.open_thread_browser)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_close)
 
@@ -282,7 +273,6 @@ class ChanScraperApp(ttk.Window):
         help_menu.add_separator()
         help_menu.add_command(label="About", command=self.show_about)
 
-        # Shortcuts
         self.bind("<Control-a>", lambda e: self.select_all())
         self.bind("<Control-d>", lambda e: self.deselect_all())
 
@@ -367,7 +357,6 @@ class ChanScraperApp(ttk.Window):
         else:
             messagebox.showinfo("Info", "No thread URL loaded.")
 
-    # --- Updater Functions ---
     def check_updates(self, silent=False):
         if not silent:
             self.status_var.set("Checking for updates...")
@@ -381,12 +370,10 @@ class ChanScraperApp(ttk.Window):
         if update_data:
             self.show_update_dialog(update_data)
         elif not silent:
-            # Show custom Up to Date dialog instead of messagebox
             self.show_uptodate_dialog()
             self.status_var.set("Ready")
 
     def show_uptodate_dialog(self):
-        """Custom 'Up to Date' Dialog with correct Icon."""
         up_win = ttk.Toplevel(self)
         up_win.title("Up to Date")
         up_win.geometry("400x200")
@@ -397,7 +384,6 @@ class ChanScraperApp(ttk.Window):
                 up_win.iconbitmap(self.icon_path)
         except: pass
         
-        # Center Window
         x = self.winfo_x() + (self.winfo_width() // 2) - 200
         y = self.winfo_y() + (self.winfo_height() // 2) - 100
         up_win.geometry(f"+{x}+{y}")
@@ -484,10 +470,23 @@ class ChanScraperApp(ttk.Window):
         if is_frozen:
             assets = data.get("assets", [])
             for asset in assets:
-                if asset["name"].endswith(".exe"):
+                name = asset["name"]
+                # UPDATED LOGIC: 
+                # Prefer the standalone .exe (which usually doesn't have 'Setup' in name)
+                # But fallback to any .exe if needed.
+                if name.endswith(".exe") and "Setup" not in name:
                     download_url = asset["browser_download_url"]
                     target_filename = "update.new"
                     break
+            
+            # If we didn't find a standalone, fallback to the first available exe (likely installer)
+            if not download_url:
+                for asset in assets:
+                     if asset["name"].endswith(".exe"):
+                        download_url = asset["browser_download_url"]
+                        target_filename = "update.new"
+                        break
+
         else:
             download_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{data['tag_name']}/chan_scraper.py"
             target_filename = "chan_scraper.py"
@@ -598,7 +597,7 @@ del "%~f0"
                         ext=post['ext'], 
                         filename=post.get('filename', ''), 
                         board=self.board, 
-                        fsize=post.get('fsize', 0) # Added File Size
+                        fsize=post.get('fsize', 0) 
                     )
                     self.media_items.append(item)
                     seen_tim.add(post['tim'])
@@ -813,14 +812,11 @@ del "%~f0"
             frame.configure(bg="white", relief=tk.FLAT)
         self.update_download_btn()
 
-    # --- UPDATED: Show Size in Button ---
     def update_download_btn(self):
         count = len(self.selected_items)
         
-        # Calculate total size in bytes
         total_bytes = sum(item.fsize for item in self.media_items if item.tim in self.selected_items)
         
-        # Format size
         if total_bytes < 1024 * 1024:
             size_str = f"{total_bytes / 1024:.1f} KB"
         else:
