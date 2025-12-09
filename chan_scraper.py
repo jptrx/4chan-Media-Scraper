@@ -38,6 +38,7 @@ API_BASE = "https://a.4cdn.org"
 IMG_BASE = "https://i.4cdn.org"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 SETTINGS_FILE = "settings.json"
+MAX_CONCURRENT_DOWNLOADS = 6
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -98,25 +99,33 @@ class AsyncWorker:
     def __init__(self, loop):
         self.loop = loop
         self.session = None
+        self.timeout = aiohttp.ClientTimeout(total=30, connect=10)
 
     async def init_session(self):
-        self.session = aiohttp.ClientSession(headers={"User-Agent": USER_AGENT})
+        self.session = aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, timeout=self.timeout)
 
     async def close_session(self):
         if self.session:
             await self.session.close()
 
     async def fetch_json(self, url):
-        async with self.session.get(url) as response:
-            if response.status == 200:
-                return await response.json()
-            return None
+        try:
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    return await response.json()
+        except asyncio.TimeoutError:
+            logger.error(f"Request timed out for {url}")
+        except Exception as e:
+            logger.error(f"Failed to fetch JSON from {url}: {e}")
+        return None
 
     async def fetch_image_bytes(self, url):
         try:
             async with self.session.get(url) as response:
                 if response.status == 200:
                     return await response.read()
+        except asyncio.TimeoutError:
+            logger.error(f"Request timed out for {url}")
         except Exception as e:
             logger.error(f"Failed to fetch {url}: {e}")
         return None
@@ -130,6 +139,8 @@ class AsyncWorker:
                     with os.fdopen(fd, 'wb') as tmp:
                         tmp.write(data)
                     return path
+        except asyncio.TimeoutError:
+            logger.error(f"Request timed out for {url}")
         except Exception as e:
             logger.error(f"Failed to download temp video: {e}")
         return None
@@ -156,6 +167,8 @@ class AsyncWorker:
 
                         if remote_ver > local_ver:
                             return data
+        except asyncio.TimeoutError:
+            logger.error(f"Update check timed out")
         except Exception as e:
             logger.error(f"Update check failed: {e}")
         return None
@@ -170,6 +183,8 @@ class AsyncWorker:
                             if not chunk: break
                             f.write(chunk)
                     return True
+        except asyncio.TimeoutError:
+            logger.error(f"Download timed out for {url}")
         except Exception as e:
             logger.error(f"Download failed: {e}")
         return False
@@ -199,7 +214,7 @@ class ChanScraperApp(ttk.Window):
 
         self.loop = asyncio.new_event_loop()
         self.worker = AsyncWorker(self.loop)
-        self.thread = threading.Thread(target=self._start_async_loop, daemon=True)
+        self.thread = threading.Thread(target=self._start_async_loop, daemon=False)
         self.thread.start()
         
         self.media_items = []
@@ -840,6 +855,9 @@ del "%~f0"
             messagebox.showerror("Error", f"Could not create folder: {e}")
             return
         items_to_download = [i for i in self.media_items if i.tim in self.selected_items]
+        if not items_to_download:
+            messagebox.showinfo("Info", "No items selected for download.")
+            return
         self.download_btn.configure(state=DISABLED)
         self.status_var.set(f"Starting download...")
         self.progress_var.set(0)
@@ -847,32 +865,62 @@ del "%~f0"
 
     async def _download_files(self, items, save_path):
         success_count = 0
+        completed = 0
         total_items = len(items)
-        for i, item in enumerate(items):
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+        lock = asyncio.Lock()
+
+        async def download_item(item: MediaItem):
+            nonlocal success_count, completed
             filepath = save_path / item.local_filename
             if filepath.exists():
-                success_count += 1
-            else:
+                async with lock:
+                    success_count += 1
+                    completed += 1
+                await self._update_progress(completed, total_items, success_count)
+                return
+
+            async with semaphore:
                 data = await self.worker.fetch_image_bytes(item.full_url)
-                if data:
-                    try:
-                        with open(filepath, "wb") as f:
-                            f.write(data)
+            if data:
+                try:
+                    with open(filepath, "wb") as f:
+                        f.write(data)
+                    async with lock:
                         success_count += 1
-                    except Exception as e:
-                        logger.error(f"Write error: {e}")
-            progress = ((i + 1) / total_items) * 100
-            self.after(0, lambda p=progress: self.progress_var.set(p))
-            self.after(0, lambda c=success_count, t=total_items: self.status_var.set(f"Downloading: {c}/{t}"))
+                except Exception as e:
+                    logger.error(f"Write error: {e}")
+            async with lock:
+                completed += 1
+            await self._update_progress(completed, total_items, success_count)
+
+        await asyncio.gather(*(download_item(item) for item in items))
         self.after(0, lambda: messagebox.showinfo("Complete", f"Downloaded {success_count} files to:\n{save_path}"))
         self.after(0, lambda: self.status_var.set("Ready"))
         self.after(0, self.update_download_btn)
         self.after(0, lambda: self.progress_var.set(0))
 
+    async def _update_progress(self, completed, total_items, success_count):
+        progress = ((completed) / total_items) * 100 if total_items else 100
+        self.after(0, lambda p=progress: self.progress_var.set(p))
+        self.after(0, lambda c=success_count, t=total_items: self.status_var.set(f"Downloading: {c}/{t}"))
+
     def on_close(self):
         self.save_settings()
         if self.worker.session:
-            self._run_async(self.worker.close_session())
+            try:
+                close_future = asyncio.run_coroutine_threadsafe(self.worker.close_session(), self.loop)
+                close_future.result(timeout=5)
+            except Exception as e:
+                logger.error(f"Error closing session: {e}")
+
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.thread.is_alive():
+            self.thread.join(timeout=5)
+        try:
+            self.loop.close()
+        except Exception as e:
+            logger.error(f"Error closing event loop: {e}")
         self.destroy()
 
     def show_about(self):

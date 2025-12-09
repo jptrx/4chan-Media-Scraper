@@ -62,6 +62,18 @@ Download `4chan-Media-Scraper-Source-v1.2.0.zip`.
     python chan_scraper.py
     ```
 
+### Creating a beta branch quickly
+
+If you want to stage changes on a `beta` branch (or any branch name you prefer), use the helper script:
+
+```bash
+./scripts/create_beta_branch.sh            # creates/pushes a "beta" branch
+./scripts/create_beta_branch.sh beta origin  # explicit branch + remote
+```
+
+The script will create or fast-forward the local branch to the current `HEAD` and push it if the specified remote exists. If no
+remote is configured, it leaves the branch locally and tells you to add a remote before re-running.
+
 ## Usage
 
 1.  **Copy URL**: Copy a thread URL (e.g., `https://boards.4chan.org/g/thread/123456`).
